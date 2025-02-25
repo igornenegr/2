@@ -3,12 +3,13 @@ import sqlite3
 import datetime
 import requests
 import subprocess
+import csv
 from flask import Flask, request, jsonify
 from telebot import types
 
 TOKEN = "7957786141:AAG454kaD5Jda96CFrNmQTA7RO1tm5zqTjU"
 CRYPTO_PAY_API = "345300:AA4rP6kGmNp4WyySncQGtWEeavg4GWD6QTZ"
-OWNER_ID = 6331422352  # ID администратора
+OWNER_ID =  6331422352  # ID администратора
 SHADOWSOCKS_CONFIG = "/etc/shadowsocks/config.json"
 
 bot = telebot.TeleBot(TOKEN)
@@ -113,28 +114,27 @@ def create_crypto_invoice(user_id):
     response = requests.post(url, headers=headers, json=data).json()
     return response['result']['pay_url'] if response['ok'] else "Ошибка при создании счета"
 
-# Секретные команды для админа
-@bot.message_handler(commands=['add_sub'])
-def add_sub(message):
-    if message.chat.id == OWNER_ID:
-        user_id = int(message.text.split()[1])
-        conn = get_db_connection()
-        cursor = conn.cursor()
-        cursor.execute("UPDATE users SET subscribed = 1 WHERE user_id = ?", (user_id,))
-        conn.commit()
-        conn.close()
-        bot.send_message(OWNER_ID, f"Подписка добавлена пользователю {user_id}")
+# Выгрузка базы данных (только для админа)
+@bot.message_handler(commands=['export_db'])
+def export_db(message):
+    if message.chat.id != OWNER_ID:
+        bot.send_message(message.chat.id, "❌ У вас нет доступа к этой команде.")
+        return
 
-@bot.message_handler(commands=['remove_sub'])
-def remove_sub(message):
-    if message.chat.id == OWNER_ID:
-        user_id = int(message.text.split()[1])
-        conn = get_db_connection()
-        cursor = conn.cursor()
-        cursor.execute("UPDATE users SET subscribed = 0 WHERE user_id = ?", (user_id,))
-        conn.commit()
-        conn.close()
-        bot.send_message(OWNER_ID, f" Подписка убрана у пользователя {user_id}")
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT * FROM users")
+    users = cursor.fetchall()
+    conn.close()
+
+    file_path = "vpn_users_export.csv"
+    with open(file_path, mode="w", newline="", encoding="utf-8") as file:
+        writer = csv.writer(file)
+        writer.writerow(["user_id", "start_date", "end_date", "subscribed", "ss_port"])
+        writer.writerows(users)
+
+    with open(file_path, "rb") as file:
+        bot.send_document(OWNER_ID, file, caption="📂 Экспорт базы данных пользователей")
 
 # Запуск бота
 if __name__ == '__main__':
