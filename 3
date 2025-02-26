@@ -1,0 +1,13 @@
+import sqlite3
+
+conn = sqlite3.connect("vpn_users.db")
+cursor = conn.cursor()
+cursor.execute('''CREATE TABLE IF NOT EXISTS users (
+    user_id INTEGER PRIMARY KEY, 
+    start_date TEXT, 
+    end_date TEXT, 
+    subscribed INTEGER DEFAULT 0,
+    ss_port INTEGER UNIQUE
+)''')
+conn.commit()
+conn.close()
