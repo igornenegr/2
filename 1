@@ -12,6 +12,11 @@ CRYPTO_PAY_API = "345300:AA4rP6kGmNp4WyySncQGtWEeavg4GWD6QTZ"
 OWNER_ID =  6331422352  # ID администратора
 SHADOWSOCKS_CONFIG = "/etc/shadowsocks/config.json"
 
+TOKEN = "YOUR_BOT_TOKEN"
+CRYPTO_PAY_API = "YOUR_CRYPTOPAY_API_TOKEN"
+OWNER_ID = 123456789  # ID администратора
+SHADOWSOCKS_CONFIG = "/etc/shadowsocks/config.json"
+
 bot = telebot.TeleBot(TOKEN)
 app = Flask(__name__)
 
@@ -109,16 +114,20 @@ def get_ss(message):
     user = cursor.fetchone()
     
     if not user:
+        print(f"DEBUG: user {user_id} not found in DB")
         bot.send_message(user_id, "Вы не зарегистрированы. Используйте /start.")
         conn.close()
         return
     
     subscribed, ss_port = user
+    print(f"DEBUG: user_id={user_id}, subscribed={subscribed}, ss_port={ss_port}")
     
     if not subscribed:
+        print(f"DEBUG: user {user_id} has no active subscription")
         bot.send_message(user_id, "У вас нет активной подписки. Пополните баланс командой /buy.")
     else:
         if not ss_port:
+            print(f"DEBUG: Assigning new Shadowsocks port for user {user_id}")
             ss_port = add_shadowsocks_user(user_id)
         bot.send_message(user_id, f"Ваш Shadowsocks доступ:\nПорт: {ss_port}\nПароль: vpn{user_id}")
     conn.close()
