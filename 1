@@ -107,60 +107,26 @@ def get_ss(message):
     cursor = conn.cursor()
     cursor.execute("SELECT subscribed, ss_port FROM users WHERE user_id = ?", (user_id,))
     user = cursor.fetchone()
-    conn.close()
     
     if not user:
         bot.send_message(user_id, "Вы не зарегистрированы. Используйте /start.")
+        conn.close()
         return
     
     subscribed, ss_port = user
     
     if not subscribed:
         bot.send_message(user_id, "У вас нет активной подписки. Пополните баланс командой /buy.")
-    elif ss_port:
-        bot.send_message(user_id, f"Ваш Shadowsocks доступ:\nПорт: {ss_port}\nПароль: vpn{user_id}")
     else:
-        bot.send_message(user_id, "Ваш Shadowsocks еще не настроен. Попробуйте позже.")
-
-# Оплата через CryptoBot
-@bot.message_handler(commands=['buy_crypto'])
-def buy_crypto(message):
-    user_id = message.chat.id
-    invoice = create_crypto_invoice(user_id)
-    bot.send_message(user_id, f"Оплатите через CryptoBot: {invoice}")
-
-# Проверка платежей в CryptoBot
-def create_crypto_invoice(user_id):
-    url = "https://pay.crypt.bot/api/createInvoice"
-    headers = {"Crypto-Pay-API-Token": CRYPTO_PAY_API}
-    data = {"asset": "USDT", "amount": 2.5, "description": "VPN подписка", "hidden_message": str(user_id)}
-    response = requests.post(url, headers=headers, json=data).json()
-    return response['result']['pay_url'] if response['ok'] else "Ошибка при создании счета"
-
-# Выгрузка базы данных (только для админа)
-@bot.message_handler(commands=['export_db'])
-def export_db(message):
-    if message.chat.id != OWNER_ID:
-        bot.send_message(message.chat.id, "❌ У вас нет доступа к этой команде.")
-        return
-
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute("SELECT * FROM users")
-    users = cursor.fetchall()
+        if not ss_port:
+            ss_port = add_shadowsocks_user(user_id)
+        bot.send_message(user_id, f"Ваш Shadowsocks доступ:\nПорт: {ss_port}\nПароль: vpn{user_id}")
     conn.close()
-
-    file_path = "/tmp/users.csv"
-    with open(file_path, mode="w", newline="", encoding="utf-8") as file:
-        writer = csv.writer(file)
-        writer.writerow(["user_id", "start_date", "end_date", "subscribed", "ss_port"])
-        writer.writerows(users)
-
-    with open(file_path, "rb") as file:
-        bot.send_document(OWNER_ID, file, caption="📂 Экспорт базы данных пользователей")
 
 # Запуск бота
 if __name__ == '__main__':
     bot.polling(none_stop=True)
     app.run(host='0.0.0.0', port=5000)
+
+
 
