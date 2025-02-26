@@ -99,6 +99,29 @@ def status(message):
     else:
         bot.send_message(user_id, f"Ваш пробный период активен до {end_date.strftime('%Y-%m-%d')}.")
 
+# Команда /get_ss для получения данных Shadowsocks
+@bot.message_handler(commands=['get_ss'])
+def get_ss(message):
+    user_id = message.chat.id
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT subscribed, ss_port FROM users WHERE user_id = ?", (user_id,))
+    user = cursor.fetchone()
+    conn.close()
+    
+    if not user:
+        bot.send_message(user_id, "Вы не зарегистрированы. Используйте /start.")
+        return
+    
+    subscribed, ss_port = user
+    
+    if not subscribed:
+        bot.send_message(user_id, "У вас нет активной подписки. Пополните баланс командой /buy.")
+    elif ss_port:
+        bot.send_message(user_id, f"Ваш Shadowsocks доступ:\nПорт: {ss_port}\nПароль: vpn{user_id}")
+    else:
+        bot.send_message(user_id, "Ваш Shadowsocks еще не настроен. Попробуйте позже.")
+
 # Оплата через CryptoBot
 @bot.message_handler(commands=['buy_crypto'])
 def buy_crypto(message):
@@ -127,7 +150,7 @@ def export_db(message):
     users = cursor.fetchall()
     conn.close()
 
-    file_path = "vpn_users_export.csv"
+    file_path = "/tmp/users.csv"
     with open(file_path, mode="w", newline="", encoding="utf-8") as file:
         writer = csv.writer(file)
         writer.writerow(["user_id", "start_date", "end_date", "subscribed", "ss_port"])
@@ -140,3 +163,4 @@ def export_db(message):
 if __name__ == '__main__':
     bot.polling(none_stop=True)
     app.run(host='0.0.0.0', port=5000)
+
