@@ -12,11 +12,6 @@ CRYPTO_PAY_API = "345300:AA4rP6kGmNp4WyySncQGtWEeavg4GWD6QTZ"
 OWNER_ID =  6331422352  # ID администратора
 SHADOWSOCKS_CONFIG = "/etc/shadowsocks/config.json"
 
-TOKEN = "YOUR_BOT_TOKEN"
-CRYPTO_PAY_API = "YOUR_CRYPTOPAY_API_TOKEN"
-OWNER_ID = 123456789  # ID администратора
-SHADOWSOCKS_CONFIG = "/etc/shadowsocks/config.json"
-
 bot = telebot.TeleBot(TOKEN)
 app = Flask(__name__)
 
@@ -58,6 +53,19 @@ def add_shadowsocks_user(user_id):
         config_file.write(f'{{"server_port": {ss_port}, "password": "vpn{user_id}"}}\n')
     subprocess.run(["systemctl", "restart", "shadowsocks-libev"])
     return ss_port
+
+# Функция для выгрузки данных пользователей в CSV
+def export_users_to_csv():
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT * FROM users")
+    users = cursor.fetchall()
+    conn.close()
+    
+    with open("vpn_users_export.csv", mode="w", newline="", encoding="utf-8") as file:
+        writer = csv.writer(file)
+        writer.writerow(["user_id", "start_date", "end_date", "subscribed", "ss_port"])
+        writer.writerows(users)
 
 # Команда /start
 @bot.message_handler(commands=['start'])
@@ -132,10 +140,18 @@ def get_ss(message):
         bot.send_message(user_id, f"Ваш Shadowsocks доступ:\nПорт: {ss_port}\nПароль: vpn{user_id}")
     conn.close()
 
+# Команда /export_users для выгрузки пользователей
+@bot.message_handler(commands=['export_users'])
+def export_users(message):
+    if message.chat.id == OWNER_ID:
+        export_users_to_csv()
+        bot.send_message(OWNER_ID, "Файл с пользователями успешно создан: vpn_users_export.csv")
+    else:
+        bot.send_message(message.chat.id, "У вас нет прав для выполнения этой команды.")
+
 # Запуск бота
 if __name__ == '__main__':
     bot.polling(none_stop=True)
     app.run(host='0.0.0.0', port=5000)
-
 
 
