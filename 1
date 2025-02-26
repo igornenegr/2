@@ -1,5 +1,4 @@
 import telebot
-import sqlite3
 import datetime
 import requests
 import subprocess
@@ -8,103 +7,66 @@ from flask import Flask, request, jsonify
 from telebot import types
 
 TOKEN = "7957786141:AAG454kaD5Jda96CFrNmQTA7RO1tm5zqTjU"
-CRYPTO_PAY_API = "345300:AA4rP6kGmNp4WyySncQGtWEeavg4GWD6QTZ"
-OWNER_ID =  6331422352  # ID администратора
+CRYPTO_PAY_API = "YOUR_CRYPTOPAY_API_TOKEN"
+OWNER_ID = 6331422352  # ID администратора
 SHADOWSOCKS_CONFIG = "/etc/shadowsocks/config.json"
+USER_DATA_FILE = "vpn_users.txt"
 
 bot = telebot.TeleBot(TOKEN)
 app = Flask(__name__)
 
-# Функция для подключения к базе данных
-def get_db_connection():
-    return sqlite3.connect("vpn_users.db", check_same_thread=False)
+# Функция для чтения пользователей из файла
+def read_users():
+    users = {}
+    try:
+        with open(USER_DATA_FILE, "r") as file:
+            for line in file:
+                user_id, start_date, end_date, subscribed, ss_port = line.strip().split(",")
+                users[int(user_id)] = {
+                    "start_date": start_date,
+                    "end_date": end_date,
+                    "subscribed": int(subscribed),
+                    "ss_port": int(ss_port) if ss_port != "None" else None,
+                }
+    except FileNotFoundError:
+        pass
+    return users
 
-# Создание таблицы пользователей
-conn = get_db_connection()
-cursor = conn.cursor()
-cursor.execute('''CREATE TABLE IF NOT EXISTS users (
-    user_id INTEGER PRIMARY KEY, 
-    start_date TEXT, 
-    end_date TEXT, 
-    subscribed INTEGER DEFAULT 0,
-    ss_port INTEGER UNIQUE
-)''')
-conn.commit()
-conn.close()
+# Функция для записи пользователей в файл
+def write_users(users):
+    with open(USER_DATA_FILE, "w") as file:
+        for user_id, data in users.items():
+            file.write(f"{user_id},{data['start_date']},{data['end_date']},{data['subscribed']},{data['ss_port']}\n")
 
 # Генерация порта для Shadowsocks
-def generate_ss_port():
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute("SELECT MAX(ss_port) FROM users")
-    last_port = cursor.fetchone()[0]
-    conn.close()
-    return (last_port + 1) if last_port else 8388  # Начнем с порта 8388
-
-# Добавление нового пользователя в Shadowsocks
-def add_shadowsocks_user(user_id):
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    ss_port = generate_ss_port()
-    cursor.execute("UPDATE users SET ss_port = ? WHERE user_id = ?", (ss_port, user_id))
-    conn.commit()
-    conn.close()
-    with open(SHADOWSOCKS_CONFIG, "a") as config_file:
-        config_file.write(f'{{"server_port": {ss_port}, "password": "vpn{user_id}"}}\n')
-    subprocess.run(["systemctl", "restart", "shadowsocks-libev"])
-    return ss_port
-
-# Функция для выгрузки данных пользователей в CSV
-def export_users_to_csv():
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute("SELECT * FROM users")
-    users = cursor.fetchall()
-    conn.close()
-    
-    with open("vpn_users_export.csv", mode="w", newline="", encoding="utf-8") as file:
-        writer = csv.writer(file)
-        writer.writerow(["user_id", "start_date", "end_date", "subscribed", "ss_port"])
-        writer.writerows(users)
+def generate_ss_port(users):
+    ports = [user["ss_port"] for user in users.values() if user["ss_port"]]
+    return max(ports) + 1 if ports else 8388
 
 # Команда /start
 @bot.message_handler(commands=['start'])
 def start(message):
     user_id = message.chat.id
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute("SELECT * FROM users WHERE user_id = ?", (user_id,))
-    user = cursor.fetchone()
-    
-    if not user:
-        start_date = datetime.datetime.now()
-        end_date = start_date + datetime.timedelta(days=3)  # Пробный период
-        cursor.execute("INSERT INTO users (user_id, start_date, end_date, subscribed) VALUES (?, ?, ?, 0)", 
-                       (user_id, start_date, end_date))
-        conn.commit()
+    users = read_users()
+    if user_id not in users:
+        start_date = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        end_date = (datetime.datetime.now() + datetime.timedelta(days=3)).strftime("%Y-%m-%d %H:%M:%S")
+        users[user_id] = {"start_date": start_date, "end_date": end_date, "subscribed": 0, "ss_port": None}
+        write_users(users)
         bot.send_message(user_id, "Добро пожаловать! Вам доступен 3-дневный пробный период.")
     else:
         bot.send_message(user_id, "Вы уже зарегистрированы. Проверьте статус подписки командой /status")
-    conn.close()
 
 # Команда /status
 @bot.message_handler(commands=['status'])
 def status(message):
     user_id = message.chat.id
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute("SELECT end_date, subscribed, ss_port FROM users WHERE user_id = ?", (user_id,))
-    user = cursor.fetchone()
-    conn.close()
-    
-    if not user:
+    users = read_users()
+    if user_id not in users:
         bot.send_message(user_id, "Вы не зарегистрированы. Используйте /start.")
         return
-    
-    end_date = datetime.datetime.strptime(user[0], "%Y-%m-%d %H:%M:%S.%f")
-    subscribed = user[1]
-    ss_port = user[2]
-    
+    end_date = datetime.datetime.strptime(users[user_id]["end_date"], "%Y-%m-%d %H:%M:%S")
+    subscribed = users[user_id]["subscribed"]
     if subscribed:
         bot.send_message(user_id, f"Ваша подписка активна до {end_date.strftime('%Y-%m-%d')}.")
     elif datetime.datetime.now() > end_date:
@@ -116,35 +78,28 @@ def status(message):
 @bot.message_handler(commands=['get_ss'])
 def get_ss(message):
     user_id = message.chat.id
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute("SELECT subscribed, ss_port FROM users WHERE user_id = ?", (user_id,))
-    user = cursor.fetchone()
-    
-    if not user:
-        print(f"DEBUG: user {user_id} not found in DB")
+    users = read_users()
+    if user_id not in users:
         bot.send_message(user_id, "Вы не зарегистрированы. Используйте /start.")
-        conn.close()
         return
-    
-    subscribed, ss_port = user
-    print(f"DEBUG: user_id={user_id}, subscribed={subscribed}, ss_port={ss_port}")
-    
-    if not subscribed:
-        print(f"DEBUG: user {user_id} has no active subscription")
+    if not users[user_id]["subscribed"]:
         bot.send_message(user_id, "У вас нет активной подписки. Пополните баланс командой /buy.")
     else:
-        if not ss_port:
-            print(f"DEBUG: Assigning new Shadowsocks port for user {user_id}")
-            ss_port = add_shadowsocks_user(user_id)
-        bot.send_message(user_id, f"Ваш Shadowsocks доступ:\nПорт: {ss_port}\nПароль: vpn{user_id}")
-    conn.close()
+        if not users[user_id]["ss_port"]:
+            users[user_id]["ss_port"] = generate_ss_port(users)
+            write_users(users)
+        bot.send_message(user_id, f"Ваш Shadowsocks доступ:\nПорт: {users[user_id]['ss_port']}\nПароль: vpn{user_id}")
 
 # Команда /export_users для выгрузки пользователей
 @bot.message_handler(commands=['export_users'])
 def export_users(message):
     if message.chat.id == OWNER_ID:
-        export_users_to_csv()
+        users = read_users()
+        with open("vpn_users_export.csv", mode="w", newline="", encoding="utf-8") as file:
+            writer = csv.writer(file)
+            writer.writerow(["user_id", "start_date", "end_date", "subscribed", "ss_port"])
+            for user_id, data in users.items():
+                writer.writerow([user_id, data["start_date"], data["end_date"], data["subscribed"], data["ss_port"]])
         bot.send_message(OWNER_ID, "Файл с пользователями успешно создан: vpn_users_export.csv")
     else:
         bot.send_message(message.chat.id, "У вас нет прав для выполнения этой команды.")
