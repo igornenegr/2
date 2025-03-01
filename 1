@@ -3,6 +3,8 @@ import datetime
 import requests
 import subprocess
 import csv
+import os
+import json
 from flask import Flask, request, jsonify
 from telebot import types
 
@@ -47,6 +49,31 @@ def generate_ss_port(users):
     ports = [user["ss_port"] for user in users.values() if user["ss_port"]]
     return max(ports) + 1 if ports else 8388
 
+# Функция для обновления конфигурации Shadowsocks
+def update_shadowsocks_config():
+    users = read_users()
+    config = {
+        "server": "0.0.0.0",
+        "server_port": 8388,
+        "password": "default_password",
+        "timeout": 300,
+        "method": "aes-256-gcm",
+        "fast_open": False,
+        "workers": 1,
+        "additional_ports": {}
+    }
+    
+    for user_id, data in users.items():
+        if data["subscribed"] and data["ss_port"]:
+            config["additional_ports"][str(data["ss_port"])] = f"vpn{user_id}"
+
+    try:
+        with open(SHADOWSOCKS_CONFIG, "w") as file:
+            json.dump(config, file, indent=4)
+        subprocess.run(["systemctl", "restart", "shadowsocks"], check=True)
+    except Exception as e:
+        print(f"Ошибка обновления Shadowsocks: {e}")
+
 # Команда /start
 @bot.message_handler(commands=['start'])
 def start(message):
@@ -61,23 +88,6 @@ def start(message):
     else:
         bot.send_message(user_id, "Вы уже зарегистрированы. Проверьте статус подписки командой /status")
 
-# Команда /status
-@bot.message_handler(commands=['status'])
-def status(message):
-    user_id = message.chat.id
-    users = read_users()
-    if user_id not in users:
-        bot.send_message(user_id, "Вы не зарегистрированы. Используйте /start.")
-        return
-    end_date = datetime.datetime.strptime(users[user_id]["end_date"], "%Y-%m-%d %H:%M:%S")
-    subscribed = users[user_id]["subscribed"]
-    if subscribed:
-        bot.send_message(user_id, f"Ваша подписка активна до {end_date.strftime('%Y-%m-%d')}.")
-    elif datetime.datetime.now() > end_date:
-        bot.send_message(user_id, "Ваша подписка истекла! Пополните баланс командой /buy.")
-    else:
-        bot.send_message(user_id, f"Ваш пробный период активен до {end_date.strftime('%Y-%m-%d')}.")
-
 # Команда /get_ss для получения данных Shadowsocks
 @bot.message_handler(commands=['get_ss'])
 def get_ss(message):
@@ -88,30 +98,23 @@ def get_ss(message):
         return
     if not users[user_id]["subscribed"]:
         bot.send_message(user_id, "У вас нет активной подписки. Пополните баланс командой /buy.")
-    else:
-        if not users[user_id]["ss_port"]:
-            users[user_id]["ss_port"] = generate_ss_port(users)
-            write_users(users)
-        bot.send_message(user_id, f"Ваш Shadowsocks доступ:\nПорт: {users[user_id]['ss_port']}\nПароль: vpn{user_id}")
+        return
+    
+    if not users[user_id]["ss_port"]:
+        users[user_id]["ss_port"] = generate_ss_port(users)
+        write_users(users)
+        update_shadowsocks_config()
 
-# Команда /export_users для выгрузки пользователей
-@bot.message_handler(commands=['export_users'])
-def export_users(message):
-    if message.chat.id == OWNER_ID:
-        users = read_users()
-        export_file = os.path.join(USER_DATA_DIR, "vpn_users_export.csv")
-        with open(export_file, mode="w", newline="", encoding="utf-8") as file:
-            writer = csv.writer(file)
-            writer.writerow(["user_id", "start_date", "end_date", "subscribed", "ss_port"])
-            for user_id, data in users.items():
-                writer.writerow([user_id, data["start_date"], data["end_date"], data["subscribed"], data["ss_port"]])
-        bot.send_message(OWNER_ID, f"Файл с пользователями успешно создан: {export_file}")
-    else:
-        bot.send_message(message.chat.id, "У вас нет прав для выполнения этой команды.")
+    bot.send_message(user_id, f"Ваш Shadowsocks доступ:\n"
+                              f"IP: [ЗАМЕНИ НА IP СЕРВЕРА]\n"
+                              f"Порт: {users[user_id]['ss_port']}\n"
+                              f"Пароль: vpn{user_id}\n"
+                              f"Метод шифрования: aes-256-gcm")
 
 # Запуск бота
 if __name__ == '__main__':
     bot.polling(none_stop=True)
     app.run(host='0.0.0.0', port=5000)
+
 
 
