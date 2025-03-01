@@ -10,7 +10,11 @@ TOKEN = "7957786141:AAG454kaD5Jda96CFrNmQTA7RO1tm5zqTjU"
 CRYPTO_PAY_API = "YOUR_CRYPTOPAY_API_TOKEN"
 OWNER_ID = 6331422352  # ID администратора
 SHADOWSOCKS_CONFIG = "/etc/shadowsocks/config.json"
-USER_DATA_FILE = "vpn_users.txt"
+USER_DATA_DIR = os.path.expanduser("~/.vpn_bot/")
+USER_DATA_FILE = os.path.join(USER_DATA_DIR, "vpn_users.txt")
+
+# Убедимся, что директория существует
+os.makedirs(USER_DATA_DIR, exist_ok=True)
 
 bot = telebot.TeleBot(TOKEN)
 app = Flask(__name__)
@@ -95,12 +99,13 @@ def get_ss(message):
 def export_users(message):
     if message.chat.id == OWNER_ID:
         users = read_users()
-        with open("vpn_users_export.csv", mode="w", newline="", encoding="utf-8") as file:
+        export_file = os.path.join(USER_DATA_DIR, "vpn_users_export.csv")
+        with open(export_file, mode="w", newline="", encoding="utf-8") as file:
             writer = csv.writer(file)
             writer.writerow(["user_id", "start_date", "end_date", "subscribed", "ss_port"])
             for user_id, data in users.items():
                 writer.writerow([user_id, data["start_date"], data["end_date"], data["subscribed"], data["ss_port"]])
-        bot.send_message(OWNER_ID, "Файл с пользователями успешно создан: vpn_users_export.csv")
+        bot.send_message(OWNER_ID, f"Файл с пользователями успешно создан: {export_file}")
     else:
         bot.send_message(message.chat.id, "У вас нет прав для выполнения этой команды.")
 
